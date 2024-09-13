@@ -6,7 +6,7 @@ use polars::io::SerReader;
 use ratatui::backend::CrosstermBackend;
 use std::error::Error;
 use std::fs::File;
-use std::io::{self};
+use std::io::{self, Write};
 use std::path::PathBuf;
 use tabiew::app::status_bar::StatusBar;
 use tabiew::app::tabular::{Tabular, TabularType};
@@ -19,6 +19,7 @@ use tabiew::sql::SqlBackend;
 use tabiew::theme::{Argonaut, Monokai, Terminal};
 use tabiew::tui::Tui;
 use tabiew::utils::{as_ascii, infer_schema_safe};
+use tempfile::NamedTempFile;
 
 fn main() -> AppResult<()> {
     // Parse CLI
@@ -27,10 +28,13 @@ fn main() -> AppResult<()> {
     // Create the sql backend.
     let mut sql_backend = SqlBackend::new();
 
+    let files = match args.stdin {
+        true => vec![stdin_to_tmp()].into_iter(),
+        _ => args.files.into_iter(),
+    };
+
     // Instantiate app components
-    let tabs = args
-        .files
-        .iter()
+    let tabs = files
         .map(|path| {
             let name = path
                 .file_stem()
@@ -106,6 +110,19 @@ fn main() -> AppResult<()> {
     Ok(())
 }
 
+#[allow(unused)]
+fn stdin_to_tmp() -> PathBuf {
+    let mut buffer = String::new();
+    let mut file = NamedTempFile::new().unwrap();
+
+    while io::stdin().read_line(&mut buffer).unwrap() != 0 {
+        let buffer = std::mem::take(&mut buffer);
+        writeln!(file, "{}", buffer);
+    }
+    let (_, b) = file.keep().unwrap();
+    b
+}
+
 fn read_csv(
     path: PathBuf,
     infer_schema: &InferSchema,
@@ -132,5 +149,7 @@ fn read_csv(
 }
 
 fn read_parquet(path: PathBuf) -> Result<DataFrame, Box<dyn Error>> {
-    Ok(ParquetReader::new(File::open(&path)?).set_rechunk(true).finish()?)
+    Ok(ParquetReader::new(File::open(&path)?)
+        .set_rechunk(true)
+        .finish()?)
 }
